@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { useTheme } from '../../context/ThemeContext'
 import { useNavigate } from 'react-router-dom'
 import {
   MessageSquarePlus,
@@ -9,7 +10,9 @@ import {
   Shield,
   Menu,
   X,
-  Heart
+  Heart,
+  Moon,
+  Sun
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -23,6 +26,7 @@ const Sidebar = ({
   onToggleCollapse,
 }) => {
   const { user, logout, isAdmin } = useAuth()
+  const { theme, toggleTheme, isDark } = useTheme()
   const navigate = useNavigate()
   const [deleteConfirm, setDeleteConfirm] = useState(null)
 
@@ -56,6 +60,13 @@ const Sidebar = ({
         <button className="toggle-btn" onClick={onToggleCollapse}>
           <Menu size={20} />
         </button>
+        <button 
+          className="toggle-btn theme-toggle-mini" 
+          onClick={toggleTheme}
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {isDark ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
       </div>
     )
   }
@@ -67,9 +78,18 @@ const Sidebar = ({
           <Heart size={28} strokeWidth={2.5} />
           <span>Health Agent</span>
         </div>
-        <button className="toggle-btn" onClick={onToggleCollapse}>
-          <X size={20} />
-        </button>
+        <div className="sidebar-header-actions">
+          <button 
+            className="theme-toggle-btn" 
+            onClick={toggleTheme}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button className="toggle-btn" onClick={onToggleCollapse}>
+            <X size={20} />
+          </button>
+        </div>
       </div>
 
       <button className="new-chat-btn" onClick={onNewChat}>
@@ -123,12 +143,12 @@ const Sidebar = ({
             <span>Admin Panel</span>
           </button>
         )}
-        
+
         <div className="user-info">
           <User size={18} />
           <span>{user?.username}</span>
         </div>
-        
+
         <button className="footer-btn logout-btn" onClick={handleLogout}>
           <LogOut size={18} />
           <span>Logout</span>

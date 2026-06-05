@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import DocumentUpload from './DocumentUpload'
+import UserManagement from './UserManagement'
 import { adminAPI } from '../../services/api'
 import {
   Upload,
@@ -12,7 +13,8 @@ import {
   Clock,
   ArrowLeft,
   Database,
-  HardDrive
+  HardDrive,
+  Users
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import './Admin.css'
@@ -23,6 +25,7 @@ const AdminDashboard = () => {
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [activeTab, setActiveTab] = useState('documents') // 'documents' or 'users'
 
   useEffect(() => {
     loadDocuments()
@@ -99,6 +102,23 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+      <div className="admin-tabs">
+        <button
+          className={`tab-btn ${activeTab === 'documents' ? 'active' : ''}`}
+          onClick={() => setActiveTab('documents')}
+        >
+          <FileText size={20} />
+          Documents
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'users' ? 'active' : ''}`}
+          onClick={() => setActiveTab('users')}
+        >
+          <Users size={20} />
+          User Management
+        </button>
+      </div>
+
       <div className="admin-stats">
         <div className="stat-card">
           <div className="stat-icon primary">
@@ -142,6 +162,10 @@ const AdminDashboard = () => {
       </div>
 
       <div className="admin-content">
+        {activeTab === 'users' ? (
+          <UserManagement />
+        ) : (
+          <>
         <DocumentUpload onUploadComplete={loadDocuments} />
 
         <div className="documents-section">
@@ -216,6 +240,8 @@ const AdminDashboard = () => {
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   )

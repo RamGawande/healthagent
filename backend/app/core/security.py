@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
@@ -41,8 +42,13 @@ def decode_access_token(token: str):
     except JWTError:
         return None
 
-def authenticate_user(db: Session, username: str, password: str):
-    user = db.query(User).filter(User.username == username).first()
+def authenticate_user(db: Session, username_or_email: str, password: str):
+    """Authenticate user by username or email"""
+    # Search for user by username OR email
+    user = db.query(User).filter(
+        or_(User.username == username_or_email, User.email == username_or_email)
+    ).first()
+    
     if not user:
         return False
     if not verify_password(password, user.hashed_password):

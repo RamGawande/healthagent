@@ -13,16 +13,17 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: str = "sqlite:///./medical_assistant.db"
     
     # Security
-    SECRET_KEY: str
+    SECRET_KEY: str = "default-secret-key-please-change-in-production-min-32-chars-required"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
-    # API Keys
-    GOOGLE_API_KEY: str
-    TAVILY_API_KEY: str
+    # API Keys (with defaults for better error messages)
+    GOOGLE_API_KEY: str = "your-google-api-key-here"
+    TAVILY_API_KEY: str = "your-tavily-api-key-here"
+    GROQ_API_KEY: str = "your-groq-api-key-here"
     
     # File Upload
     UPLOAD_DIR: str = "uploads"

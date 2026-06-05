@@ -15,11 +15,16 @@ export const AuthProvider = ({ children }) => {
           const userData = await authAPI.getCurrentUser()
           setUser(userData)
         } catch (error) {
+          // Only log error, don't redirect - allow guest access
           console.error('Failed to fetch user:', error)
-          localStorage.removeItem('token')
-          localStorage.removeItem('user')
+          // Only clear token if it's truly invalid (not network error)
+          if (error.response?.status === 401) {
+            localStorage.removeItem('token')
+            localStorage.removeItem('user')
+          }
         }
       }
+      // Always set loading to false, even if there's no token
       setLoading(false)
     }
 

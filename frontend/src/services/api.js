@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-const API_BASE_URL = 'http://localhost:8000'
+// Use environment variable or fallback to localhost for development
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8009'
 
 // Create axios instance
 const api = axios.create({
@@ -29,9 +30,16 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
+      // Only redirect if not already on guest or auth pages
+      const currentPath = window.location.pathname
+      if (!currentPath.startsWith('/login') &&
+          !currentPath.startsWith('/signup') &&
+          !currentPath.startsWith('/try') &&
+          currentPath !== '/') {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }
@@ -94,6 +102,78 @@ export const sessionAPI = {
 }
 
 // Chat API
+// export const chatAPI = {
+//   sendMessage: async (sessionId, content) => {
+//     const response = await api.post(`/api/chat/${sessionId}/message`, {
+//       content,
+//       role: 'user'
+//     })
+//     return response.data
+//   },
+  
+//   getMessages: async (sessionId) => {
+//     const response = await api.get(`/api/chat/${sessionId}/messages`)
+//     return response.data
+//   },
+// }
+// Add this new function to chatAPI //////////////////////////////,,,,,,,,,,,,,ldjc ddddddddkljjvlkkkkkkkkkkkkkkkddddddddddddddddd
+// export const chatAPI = {
+//   sendMessage: async (sessionId, content) => {
+//     const response = await api.post(`/api/chat/${sessionId}/message`, {
+//       content,
+//       role: 'user'
+//     })
+//     return response.data
+//   },
+  
+//   // NEW: Streaming message function
+//   streamMessage: (sessionId, content, onToken, onComplete, onError) => {
+//     const token = localStorage.getItem('token')
+//     const url = `${API_BASE_URL}/api/chat/${sessionId}/stream`
+    
+//     const eventSource = new EventSource(url)
+    
+//     // Send the message first via POST
+//     fetch(url, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'Authorization': `Bearer ${token}`
+//       },
+//       body: JSON.stringify({ content, role: 'user' })
+//     }).then(() => {
+//       // Now listen for streaming response
+//       const streamUrl = `${API_BASE_URL}/api/chat/${sessionId}/stream?message=${encodeURIComponent(content)}`
+//       const es = new EventSource(streamUrl)
+      
+//       es.onmessage = (event) => {
+//         const data = JSON.parse(event.data)
+        
+//         if (data.error) {
+//           onError(data.token)
+//           es.close()
+//         } else if (data.done) {
+//           onComplete()
+//           es.close()
+//         } else {
+//           onToken(data.token)
+//         }
+//       }
+      
+//       es.onerror = () => {
+//         onError('Connection error')
+//         es.close()
+//       }
+      
+//       return es
+//     })
+//   },
+  
+//   getMessages: async (sessionId) => {
+//     const response = await api.get(`/api/chat/${sessionId}/messages`)
+//     return response.data
+//   },
+// }
 export const chatAPI = {
   sendMessage: async (sessionId, content) => {
     const response = await api.post(`/api/chat/${sessionId}/message`, {
@@ -103,11 +183,75 @@ export const chatAPI = {
     return response.data
   },
   
+  // FIXED: Streaming with proper POST request
+  streamMessage: async (sessionId, content, imageFile, onToken, onComplete, onError) => {
+    try {
+      const token = localStorage.getItem('token')
+      const formData = new FormData()
+      formData.append('content', content)
+      
+      if (imageFile) {
+        formData.append('image', imageFile)
+      }
+      
+      // Make POST request with streaming response
+      const response = await fetch(`${API_BASE_URL}/api/chat/${sessionId}/stream`, {
+        method: 'POST',  // ✅ Must be POST
+        headers: {
+          'Authorization': `Bearer ${token}`
+          // Don't set Content-Type - browser sets it automatically for FormData
+        },
+        body: formData
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      // Read the streaming response
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (data.error) {
+                onError(data.token)
+                return
+              } else if (data.done) {
+                onComplete()
+                return
+              } else {
+                onToken(data.token)
+              }
+            } catch (e) {
+              // Skip invalid JSON
+              console.warn('Invalid JSON in stream:', line)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Streaming error:', error)
+      onError(error.message)
+    }
+  },
+  
   getMessages: async (sessionId) => {
     const response = await api.get(`/api/chat/${sessionId}/messages`)
     return response.data
   },
 }
+
 
 // Admin API
 export const adminAPI = {

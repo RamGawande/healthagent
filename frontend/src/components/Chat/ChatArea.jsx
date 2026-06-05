@@ -17,7 +17,7 @@ const ChatArea = ({ session, onUpdateTitle, sidebarCollapsed }) => {
 
   const loadMessages = async () => {
     if (!session) return
-    
+
     setLoading(true)
     try {
       const data = await chatAPI.getMessages(session.id)
@@ -33,7 +33,7 @@ const ChatArea = ({ session, onUpdateTitle, sidebarCollapsed }) => {
     if (!session || !content.trim()) return
 
     setSending(true)
-    
+
     // Add user message immediately for better UX
     const userMessage = {
       id: Date.now(),
@@ -41,24 +41,70 @@ const ChatArea = ({ session, onUpdateTitle, sidebarCollapsed }) => {
       content: content,
       created_at: new Date().toISOString(),
     }
-    setMessages([...messages, userMessage])
+    setMessages(prev => [...prev, userMessage])
+
+    // Create assistant message placeholder
+    const assistantMessageId = Date.now() + 1
+    const assistantMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+      streaming: true,
+    }
+    setMessages(prev => [...prev, assistantMessage])
+
+    let fullResponse = ''
 
     try {
-      const response = await chatAPI.sendMessage(session.id, content)
-      
-      // Reload messages to get the complete conversation
-      await loadMessages()
-      
-      // Update session title if it's the first message
-      if (messages.length === 0) {
-        const title = content.slice(0, 50) + (content.length > 50 ? '...' : '')
-        onUpdateTitle(session.id, title)
-      }
+      await chatAPI.streamMessage(
+        session.id,
+        content,
+        null,
+        // onToken - called for each token received
+        (token) => {
+          fullResponse += token
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: fullResponse }
+                : msg
+            )
+          )
+        },
+        // onComplete - called when streaming finishes
+        () => {
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, streaming: false }
+                : msg
+            )
+          )
+          setSending(false)
+
+          // Update session title if it's the first message
+          if (messages.length === 0) {
+            const title = content.slice(0, 50) + (content.length > 50 ? '...' : '')
+            onUpdateTitle(session.id, title)
+          }
+        },
+        // onError - called if there's an error
+        (error) => {
+          console.error('Streaming error:', error)
+          setMessages(prev =>
+            prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: 'Error: Failed to get response', streaming: false }
+                : msg
+            )
+          )
+          setSending(false)
+        }
+      )
     } catch (error) {
       console.error('Failed to send message:', error)
-      // Remove the optimistically added message on error
-      setMessages(messages)
-    } finally {
+      setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId))
       setSending(false)
     }
   }

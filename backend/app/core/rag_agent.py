@@ -1,24 +1,29 @@
 import os
-from typing import TypedDict, Annotated, List
+from typing import TypedDict, Annotated, List, Optional, Dict, Any
 from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, AIMessage, BaseMessage
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.prebuilt import ToolNode, tools_condition
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.tools import tool
 from langchain_tavily import TavilySearch # UPDATED IMPORT
 from langgraph.graph.message import add_messages
 import uuid
+import base64
 from app.services.vector_store import VectorStoreManager
 from app.config import get_settings
 from langgraph.checkpoint.memory import MemorySaver
+from groq import Groq
 # Load settings first
 settings = get_settings()
 
 # Set environment variables
-os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
+os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
 os.environ["TAVILY_API_KEY"] = settings.TAVILY_API_KEY
+
+# Initialize Groq client for multimodal support
+groq_client = Groq(api_key=settings.GROQ_API_KEY)
 
 # Initialize vector store
 vector_store_manager = VectorStoreManager()
@@ -39,19 +44,19 @@ def medical_assistant_rag(query: str) -> str:
         
         if not retrieved_docs:
             # Fallback to LLM knowledge
-            llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", temperature=0.3)
+            llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.3)
             response = llm.invoke(f"Answer this medical question: {query}\n\nAlways end your answer with the disclaimer: 'This information is for educational purposes only and is not a substitute for professional medical advice.'")
             return response.content
         
         context = "\n\n".join([doc.page_content for doc in retrieved_docs])
         final_prompt = f"Using the following context, please answer the user's question.\nContext: {context}\n\nUser's Question: {query}\n\nAlways end your answer with the disclaimer: 'This information is for educational purposes only and is not a substitute for professional medical advice.'"
         
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", temperature=0.3)
+        llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.3)
         response = llm.invoke(final_prompt)
         return response.content
     except Exception as e:
         # Silent fallback to LLM knowledge
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", temperature=0.3)
+        llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0.3)
         response = llm.invoke(f"Answer this medical question: {query}\n\nAlways end your answer with the disclaimer: 'This information is for educational purposes only and is not a substitute for professional medical advice.'")
         return response.content
 
@@ -75,7 +80,7 @@ class AgentState(TypedDict):
 
 # Tools and LLM setup
 tools = [web_search_tool, medical_assistant_rag, book_appointment]
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", temperature=0)
+llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
 llm_with_tools = llm.bind_tools(tools)
 
 # Agent node
@@ -87,10 +92,11 @@ def agent_node(state: AgentState):
 SYSTEM_PROMPT = """You are a helpful Indian medical appointment assistant.
 1. Use the 'tavily_search_results_json' tool to find doctors, clinics, or hospitals when a user asks.
 2. When a user asks a general medical question (e.g., 'what are the symptoms of a cold?'), use the 'medical_assistant_rag' tool.
-3. When a user wants to book an appointment, use the 'book_appointment' tool. You must ask for and collect the patient's name, phone number, city, and age before using this tool.
 Be polite and converse naturally. Always provide helpful medical information.
 4. if medical_assistant_rag tool is offline then then use tavily search tool answer medical questions.
-5. dont say im not a doctor"""
+5. dont say im not a doctor and cant give medical advice"""
+
+# 3. When a user wants to book an appointment, use the 'book_appointment' tool. You must ask for and collect the patient's name, phone number, city, and age before using this tool.
 
 class RAGAgent:
     def __init__(self, db_url: str):
@@ -130,10 +136,52 @@ class RAGAgent:
             # Tables might already exist
             pass
     
-    async def chat(self, thread_id: str, user_message: str) -> str:
+    def _prepare_multimodal_content(self, text: str, image_data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Prepare content for multimodal input (text + image)"""
+        content = [{"type": "text", "text": text}]
+        
+        if image_data and image_data.get("base64"):
+            # Format: data:image/jpeg;base64,<base64_string>
+            image_url = f"data:image/{image_data.get('mime_type', 'jpeg')};base64,{image_data['base64']}"
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": image_url}
+            })
+        
+        return content
+    
+    async def chat(self, thread_id: str, user_message: str, image_data: Optional[Dict[str, Any]] = None) -> str:
+        """Chat with optional image input"""
         config = {"configurable": {"thread_id": thread_id}}
+        
+        # For multimodal, use Groq client directly
+        if image_data:
+            try:
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": self._prepare_multimodal_content(user_message, image_data)
+                    }
+                ]
+                
+                completion = groq_client.chat.completions.create(
+                    model="meta-llama/llama-4-scout-17b-16e-instruct",
+                    messages=messages,
+                    temperature=1,
+                    max_completion_tokens=1024,
+                    top_p=1,
+                    stream=False,
+                )
+                
+                return completion.choices[0].message.content
+            except Exception as e:
+                print(f"Error in multimodal chat: {str(e)}")
+                # Fallback to text-only
+                pass
+        
+        # Text-only path using LangGraph
         initial_messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_message)]
-
         final_response = ""
         async for event in self.graph.astream({"messages": initial_messages}, config=config, stream_mode="values"):
             latest_message = event["messages"][-1]
@@ -141,6 +189,55 @@ class RAGAgent:
                 final_response = latest_message.content
 
         return final_response
+    
+    async def stream_chat(self, thread_id: str, user_message: str, image_data: Optional[Dict[str, Any]] = None):
+        """Stream chat response token by token with optional image support"""
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # For multimodal, use Groq client streaming
+        if image_data:
+            try:
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": self._prepare_multimodal_content(user_message, image_data)
+                    }
+                ]
+                
+                completion = groq_client.chat.completions.create(
+                    model="meta-llama/llama-4-scout-17b-16e-instruct",
+                    messages=messages,
+                    temperature=1,
+                    max_completion_tokens=1024,
+                    top_p=1,
+                    stream=True,
+                )
+                
+                for chunk in completion:
+                    if chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+                return
+            except Exception as e:
+                print(f"Error in multimodal streaming: {str(e)}")
+                # Fallback to text-only
+                pass
+        
+        # Text-only path using LangGraph
+        initial_messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_message)]
+        
+        async for event in self.graph.astream(
+            {"messages": initial_messages}, 
+            config=config, 
+            stream_mode="messages"
+        ):
+            # Extract the latest message
+            if isinstance(event, tuple) and len(event) == 2:
+                message, metadata = event
+                if isinstance(message, AIMessage) and message.content:
+                    # Yield the content token by token
+                    yield message.content
+
 
 
 

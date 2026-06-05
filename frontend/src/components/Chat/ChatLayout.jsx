@@ -102,6 +102,7 @@ const ChatLayout = () => {
         session={currentSession}
         onUpdateTitle={handleUpdateSessionTitle}
         sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed(false)}
       />
     </div>
   )

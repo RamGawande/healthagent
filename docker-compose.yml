@@ -1,0 +1,66 @@
+# Docker Compose file format version (NOT Python version!)
+# Python version is defined in Dockerfile: FROM python:3.12-slim
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: medical-assistant-backend
+    restart: unless-stopped
+    ports:
+      - "8009:8009"
+    environment:
+      - DATABASE_URL=sqlite:///./medical_assistant.db
+      - SECRET_KEY=${SECRET_KEY:-default-secret-key-please-change-in-production-min-32-chars-required}
+      - GROQ_API_KEY=${GROQ_API_KEY:-your-groq-api-key-here}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-your-tavily-api-key-here}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-your-google-api-key-here}
+      - UPLOAD_DIR=uploads
+      - CHROMA_DB_DIR=chroma_db
+      - ANONYMIZED_TELEMETRY=False
+    volumes:
+      # Persist data directories
+      - ./backend/uploads:/app/uploads
+      - ./backend/chroma_db:/app/chroma_db
+      - ./backend/medical_assistant.db:/app/medical_assistant.db
+    networks:
+      - medical-assistant-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: medical-assistant-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - medical-assistant-network
+    environment:
+      - API_BASE_URL=http://backend:8009
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+networks:
+  medical-assistant-network:
+    driver: bridge
+
+volumes:
+  uploads:
+  chroma_db:
+  database:
