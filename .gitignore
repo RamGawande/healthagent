@@ -1,0 +1,6 @@
+# Environments
+backend/mediassis/
+frontend/node_modules/
+
+# Env files
+.env
